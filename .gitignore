@@ -1,0 +1,27 @@
+# Build
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+
+# IDEs
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Tests / coverage
+TestResults/
+coverage*.xml
+*.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Enunciado del desafío (material del proceso, no se publica)
+*.pdf
