@@ -33,6 +33,8 @@ Este documento reúne las decisiones técnicas tomadas durante el diseño, con s
 **Consecuencias.**
 - La consistencia la garantiza la base de datos, no el proceso. La API queda stateless y puede escalar horizontalmente.
 - Se requiere Docker para levantar Postgres localmente (se provee `docker-compose.yml`).
+- El `docker-compose.yml` publica Postgres en el puerto **5433** del host, para no chocar con una instalación local en el 5432.
+- Las migraciones de EF Core se aplican al arrancar la API, así levantarla localmente es solo `docker compose up` + `dotnet run`. Con varias instancias arrancando a la vez esto no es adecuado: en un despliegue real las migraciones se aplicarían como un paso previo (script SQL o *migration bundle*).
 
 ---
 
