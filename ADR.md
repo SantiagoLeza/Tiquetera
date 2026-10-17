@@ -23,12 +23,12 @@ Este documento reúne las decisiones técnicas tomadas durante el diseño, con s
 
 ## ADR-001 — Persistencia en PostgreSQL
 
-**Contexto.** La consigna no exige una persistencia en memoria. El sistema debe garantizar integridad de datos bajo concurrencia y poder escalar.
+**Contexto.** La consigna no especifica un mecanismo de persistencia. La evaluación pone el foco en concurrencia, integridad de los datos y escalabilidad: el sistema debe garantizar la integridad bajo concurrencia y poder escalar.
 
 **Decisión.** Usar PostgreSQL con EF Core (proveedor Npgsql).
 
 **Alternativas descartadas.**
-- *Almacenamiento en memoria* (`ConcurrentDictionary` + locks). Más simple, pero el estado se pierde al reiniciar y no permite correr más de una instancia de la API: cada instancia tendría su propia copia de los asientos.
+- *Almacenamiento en memoria* (`ConcurrentDictionary` + locks). Más simple y válido para una única instancia, pero el estado se pierde al reiniciar y no permite correr más de una instancia de la API: cada instancia tendría su propia copia de los asientos, y la consistencia dependería de que haya un solo proceso.
 
 **Consecuencias.**
 - La consistencia la garantiza la base de datos, no el proceso. La API queda stateless y puede escalar horizontalmente.
