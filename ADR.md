@@ -1,6 +1,6 @@
 # Architecture Decision Records — Tiquetera
 
-Motor de reservas de asientos para una única función de cine. API REST en .NET / C#.
+Motor de reservas de asientos para una única función de cine. API REST en .NET 10 (LTS) / C#.
 
 Este documento reúne las decisiones técnicas tomadas durante el diseño, con su contexto, las alternativas evaluadas y sus consecuencias.
 
@@ -50,7 +50,11 @@ Cada actualización incluye la versión leída en la condición:
 UPDATE seats SET ... WHERE id = @id AND xmin = @versionLeida;
 ```
 
-Si otra operación modificó el asiento antes, la condición no coincide, se actualizan 0 filas y EF Core lanza `DbUpdateConcurrencyException`. Esa excepción se traduce a un error de negocio (409 Conflict).
+Si otra operación modificó el asiento antes, la condición no coincide, se actualizan 0 filas y EF Core lanza `DbUpdateConcurrencyException`. Esa excepción se traduce a un error de negocio (409 Conflict, código `seat.concurrent_modification`).
+
+**Implementación.** La versión es una *shadow property* `uint Version` marcada con `IsRowVersion()`. Npgsql la mapea a `xmin`, una columna de sistema que PostgreSQL cambia en cada `UPDATE`, así que no se crea ninguna columna. La clase `Seat` no conoce la versión: solo existe en el modelo de EF.
+
+Funciona aun si los dos requests llegan exactamente al mismo tiempo. Con el aislamiento por defecto de PostgreSQL (READ COMMITTED), el segundo `UPDATE` espera el lock de fila del primero y vuelve a evaluar el `WHERE` sobre la fila ya confirmada. Como `xmin` cambió, no afecta ninguna fila.
 
 **Granularidad.** La versión pertenece a cada asiento. Cada `Seat` es su propio agregado y unidad de consistencia: operaciones concurrentes sobre asientos distintos nunca entran en conflicto. Como las reservas son de a un asiento por vez, nunca se necesita coordinar varias filas en una misma transacción.
 
@@ -183,7 +187,7 @@ Todas las dependencias apuntan hacia el dominio. `Domain` no depende de ningún 
 
 **Motivos.**
 - Encaje directo con los handlers: el endpoint recibe el request, invoca el handler y traduce el `Result` a HTTP.
-- `TypedResults` permite que OpenAPI infiera los códigos de respuesta posibles a partir del tipo de retorno, mejorando la documentación sin atributos manuales.
+- `TypedResults` con `Results<...>` hace que el tipo de retorno declare las respuestas posibles: el compilador impide devolver otra cosa y OpenAPI infiere las respuestas exitosas (`200`, `201`, `204`) sin atributos. Los errores salen como `ProblemHttpResult`, que no indica un status concreto, así que sus códigos se declaran con `.ProducesProblem(...)` en cada endpoint.
 - El rendimiento no fue un criterio: la diferencia con Controllers es irrelevante frente al costo de acceso a la base.
 - La escalabilidad horizontal es equivalente en ambos enfoques (la API es stateless).
 
@@ -213,6 +217,8 @@ El `DELETE` también puede responder 409: al liberar un asiento libre o reservad
 
 **Precedencia.** Si aplica más de un error, se informa en este orden: 410 (vencida) → 409 (el estado no lo permite) → 403 (token incorrecto). El vencimiento se informa sin validar el token, porque que una selección venció ya es público en `GET /seats`.
 
+**Identificador.** El id del asiento distingue mayúsculas: `/seats/c7/selection` responde 404. No se normaliza para que exista un único nombre canónico por asiento.
+
 **Hold token por header.** `PUT` y `DELETE` reciben el token en el header `X-Hold-Token`. Se descartó enviarlo en el body porque, aunque HTTP lo permite, algunos clientes y proxies ignoran el body en `DELETE`; el header funciona igual en cualquier verbo.
 
 **Consecuencias.** Los errores siguen el formato ProblemDetails. Las fechas se expresan en UTC (ISO 8601).
@@ -226,6 +232,10 @@ El `DELETE` también puede responder 409: al liberar un asiento libre o reservad
 **Decisión.** Los handlers publican eventos de dominio (`SeatSelected`, `SeatReserved`, `SeatReleased`) a través de una interfaz `ISeatEventPublisher`. La implementación inicial, `LoggingSeatEventPublisher`, registra los eventos en el log. El canal en tiempo real **no se implementa** en esta versión; la extensión queda documentada aquí y en comentarios en el código.
 
 Los eventos se publican **después** de persistir con éxito. Publicar antes podría informar una selección que luego pierde la carrera de concurrencia.
+
+Los eventos son records del dominio y los crean los handlers después del `SaveAsync`. No los acumula la entidad: con cuatro casos de uso, una colección de eventos dentro de `Seat` agregaría ceremonia sin beneficio. Ningún evento transporta el hold token.
+
+El contrato de `ISeatEventPublisher` prohíbe lanzar excepciones por fallas al notificar. Cuando se publica, el cambio ya está confirmado, y fallar el request le diría al cliente que la operación no ocurrió. Si en el futuro hiciera falta garantía de entrega, se usaría el patrón *transactional outbox*: guardar el evento en la misma transacción que el asiento y despacharlo después.
 
 **Extensión prevista.** Agregar una implementación que envíe los eventos por **Server-Sent Events** (`GET /seats/events`), sin modificar los handlers.
 
@@ -245,10 +255,15 @@ Puntos considerados para esa extensión:
 - **Tests de casos de uso:** handlers con dobles del repositorio y del publicador de eventos.
 - **Tests de integración:** API completa con `WebApplicationFactory` contra un **PostgreSQL real** levantado con **Testcontainers**.
 - **Test de concurrencia:** N solicitudes en paralelo sobre el mismo asiento; exactamente una debe tener éxito. Incluye el caso de un asiento con selección vencida disputado por varios clientes.
+- **Test determinístico del token de concurrencia:** dos repositorios leen la misma versión del asiento, ambos lo modifican y ambos guardan; el segundo debe recibir `seat.concurrent_modification`. No depende de que los requests se superpongan en el tiempo.
+
+Los tests de integración reemplazan `TimeProvider` por un `FakeTimeProvider`, así que el vencimiento (410) se prueba de punta a punta sin esperas.
 
 **Alternativa descartada.** *Proveedor en memoria de EF Core o SQLite* para integración. No reproducen el comportamiento de PostgreSQL (en particular `xmin`), por lo que el test de concurrencia no probaría nada real.
 
-**Consecuencias.** Correr los tests de integración requiere Docker.
+**Consecuencias.**
+- Correr los tests de integración requiere Docker.
+- Se verificó que los tests protegen lo que dicen proteger: al quitar el token de concurrencia, fallan el test determinístico y las carreras de selección paralela. Las carreras paralelas dependen del timing: muestran que hay superposición real (la mayoría de los perdedores recibe `seat.concurrent_modification`), pero la garantía la da el test determinístico.
 
 ---
 

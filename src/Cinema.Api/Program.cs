@@ -31,7 +31,16 @@ builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, _, _) =>
+{
+    document.Info.Title = "Tiquetera API";
+    document.Info.Description =
+        "Motor de reservas de asientos para una única función de cine. " +
+        "Flujo: seleccionar un asiento (POST) devuelve un hold token; confirmar (PUT) o liberar (DELETE) " +
+        "exigen ese token en el header X-Hold-Token. La selección vence a los 5 minutos (configurable). " +
+        "Los errores siguen el formato ProblemDetails (RFC 9457), con un campo 'code' estable.";
+    return Task.CompletedTask;
+}));
 
 var app = builder.Build();
 

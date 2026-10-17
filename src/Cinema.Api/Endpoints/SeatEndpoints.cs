@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Cinema.Api.Http;
 using Cinema.Application.Seats;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -12,6 +13,9 @@ namespace Cinema.Api.Endpoints;
 public static class SeatEndpoints
 {
     public const string HoldTokenHeader = "X-Hold-Token";
+
+    private const string HoldTokenDescription =
+        "Hold token devuelto por POST /seats/{id}/selection. Prueba que quien confirma o libera es quien seleccionó.";
 
     public static IEndpointRouteBuilder MapSeatEndpoints(this IEndpointRouteBuilder app)
     {
@@ -72,7 +76,7 @@ public static class SeatEndpoints
     // Header obligatorio y tipado como Guid: si falta o no es un GUID válido, ASP.NET responde 400 antes de llegar acá.
     private static async Task<Results<Ok<SeatDto>, ProblemHttpResult>> ConfirmReservation(
         string id,
-        [FromHeader(Name = HoldTokenHeader)] Guid holdToken,
+        [FromHeader(Name = HoldTokenHeader), Description(HoldTokenDescription)] Guid holdToken,
         ConfirmReservationHandler handler,
         CancellationToken cancellationToken)
     {
@@ -84,7 +88,7 @@ public static class SeatEndpoints
 
     private static async Task<Results<NoContent, ProblemHttpResult>> ReleaseSeat(
         string id,
-        [FromHeader(Name = HoldTokenHeader)] Guid holdToken,
+        [FromHeader(Name = HoldTokenHeader), Description(HoldTokenDescription)] Guid holdToken,
         ReleaseSeatHandler handler,
         CancellationToken cancellationToken)
     {
