@@ -2,18 +2,25 @@
 
 ## Qué es este proyecto
 
-Desafío técnico para un proceso de ingreso: una API .NET / C# que funciona como motor de reservas de asientos de cine. Plazo: 3 días. Después hay una entrevista donde se defienden las decisiones técnicas.
+API REST en .NET 10 / C# que funciona como motor de reservas de asientos para una única función de cine, sobre PostgreSQL.
 
-**El diseño ya está cerrado y documentado en `ADR.md`. Leelo antes de escribir código y respetalo.** Si algo del ADR resulta inviable o hay que cambiarlo, avisame antes de desviarte, y actualizá el ADR en el mismo cambio.
+**El diseño está documentado en `ADR.md`. Leelo antes de escribir código y respetalo.** Si algo del ADR resulta inviable o hay que cambiarlo, planteá el cambio antes de desviarte y actualizá el ADR en el mismo commit.
 
-## Sobre mí y cómo trabajar conmigo
+## Cómo trabajar en este repo
 
-- No conozco C# ni .NET. Vengo de Python (últimamente FastAPI), sé Java y estudié C.
-- Tengo que poder explicar y defender cada línea en la entrevista. Por eso:
-  - Trabajá **paso a paso**, siguiendo el plan de abajo. Al terminar cada paso, frená y explicame lo que hiciste.
-  - Explicá los conceptos de C#/.NET nuevos con **equivalencias en Java o Python** (Spring, JPA/Hibernate, FastAPI, SQLAlchemy, pytest, etc.).
-  - Priorizá código claro e idiomático sobre código ingenioso.
-- Estoy en Windows, con Docker Desktop corriendo.
+- Priorizá código claro e idiomático sobre código ingenioso. Seguí el estilo existente: comentarios que explican el *por qué* y referencian el ADR cuando aplica.
+- El dominio (`Cinema.Domain`) no depende de ningún framework. Las reglas de negocio viven ahí, no en handlers ni endpoints.
+- Todo cambio de comportamiento lleva tests. `dotnet test` debe pasar completo antes de commitear.
+- Un commit por cambio coherente, en `main`.
+
+## Comandos
+
+```bash
+docker compose up -d                                       # Postgres 17 en el puerto 5433; la primera vez ejecuta db/init.sql
+dotnet run --project src/Cinema.Api --launch-profile http  # API en http://localhost:5054, documentación en /scalar
+dotnet test                                                # todos los tests; los de integración requieren Docker
+docker compose down -v                                     # borra la base (necesario después de modificar db/init.sql)
+```
 
 ## Consigna (resumen fiel)
 
@@ -33,13 +40,14 @@ Desafío técnico para un proceso de ingreso: una API .NET / C# que funciona com
 ## Decisiones clave (detalle y justificación en ADR.md)
 
 - PostgreSQL + EF Core (Npgsql). `docker-compose.yml` para levantar Postgres.
-- Esquema y seed en `db/init.sql`, ejecutado por Postgres al inicializar (`docker-entrypoint-initdb.d`) y montado también en Testcontainers. Sin migraciones de EF ni migración al arrancar (ADR-001).
-- Concurrencia optimista **por asiento**, con `xmin` como token de concurrencia. `DbUpdateConcurrencyException` → error de negocio (409), traducido fuera del dominio.
+- Esquema y seed en `db/init.sql`, ejecutado por Postgres al inicializar (`docker-entrypoint-initdb.d`) y montado también en Testcontainers. Sin migraciones de EF ni migración al arrancar (ADR-001). El mapeo de EF debe coincidir con ese script.
+- Sala: 8 filas (A–H) × 10 asientos = 80. Id = clave natural `"C7"` (PK y ruta). Seed determinístico en `db/init.sql` (ADR-012).
+- Concurrencia optimista **por asiento**, con `xmin` como token de concurrencia. `DbUpdateConcurrencyException` → error de negocio (409), traducido en el repositorio, fuera del dominio.
 - Hold token (GUID) emitido por el servidor al seleccionar; confirmar y liberar lo exigen en el header `X-Hold-Token`. Nunca se expone en `GET /seats`. Se limpia al reservar.
-- Expiración perezosa: se persiste `ExpiresAt`, el estado efectivo se calcula con `Seat.GetStatus(now)`. Sin background job. `now >= ExpiresAt` = vencido. `TimeProvider` inyectado; TTL configurable en `appsettings.json`.
+- Expiración perezosa: se persiste `ExpiresAt`, el estado efectivo se calcula con `Seat.GetStatus(now)`. Sin background job. `now >= ExpiresAt` = vencido. `TimeProvider` inyectado; TTL configurable en `appsettings.json` (`SeatSelection:Ttl`).
 - La respuesta de selección incluye `holdToken`, `expiresAt` (UTC ISO 8601) y `expiresInSeconds`.
 - `Result` propio para errores de negocio esperados (tipos NotFound, Conflict, Forbidden, Gone), mapeados a ProblemDetails en un único lugar. Excepciones solo para lo inesperado.
-- Estados: enum + **tabla de transiciones declarativa** `(estado, acción) → nuevo estado` dentro de `Seat`. NO patrón State. Setters privados; invariantes protegidas.
+- Estados: enum + **tabla de transiciones declarativa** `(estado, acción) → nuevo estado` dentro de `Seat`. NO patrón State. Setters privados; estado persistido y hold token privados; invariantes protegidas (y replicadas con `CHECK` en la base).
 - Capas: `Cinema.Domain`, `Cinema.Application`, `Cinema.Infrastructure`, `Cinema.Api`, más proyectos de tests. Dependencias hacia el dominio.
 - Un handler por caso de uso (`GetSeats`, `SelectSeat`, `ConfirmReservation`, `ReleaseSeat`), inyectado directo. Sin MediatR.
 - Minimal APIs con `MapGroup("/seats")` y `TypedResults`; endpoints en archivos por recurso, no en `Program.cs`.
@@ -48,18 +56,6 @@ Desafío técnico para un proceso de ingreso: una API .NET / C# que funciona com
   - `POST /seats/{id}/selection` → 201 / 404 / 409
   - `PUT /seats/{id}/reservation` → 200 / 400 / 403 / 404 / 409 / 410
   - `DELETE /seats/{id}/selection` → 204 / 400 / 403 / 404 / 409 / 410
-- Eventos de dominio (`SeatSelected`, `SeatReserved`, `SeatReleased`) vía `ISeatEventPublisher`; implementación `LoggingSeatEventPublisher`. Se publican **después** de persistir. Dejar comentarios en el código sobre la extensión futura a SSE (ver ADR-010). No implementar SSE.
+- Eventos de dominio (`SeatSelected`, `SeatReserved`, `SeatReleased`) vía `ISeatEventPublisher`; implementación `LoggingSeatEventPublisher`. Se publican **después** de persistir. La extensión a tiempo real por SSE está documentada (ADR-010) pero no implementada.
 - Tests: xUnit. Unitarios de dominio con `FakeTimeProvider`; handlers con dobles; integración con `WebApplicationFactory` + Testcontainers (Postgres real); test de concurrencia (N requests paralelos al mismo asiento → exactamente uno gana, incluido el caso de selección vencida).
-- Documentación de API con OpenAPI + Scalar.
-
-- Sala: 8 filas (A–H) × 10 asientos = 80. Id = clave natural `"C7"` (PK y ruta). Seed determinístico en `db/init.sql` (ADR-012).
-
-## Plan de trabajo (en este orden, frenando al final de cada paso)
-
-1. Estructura de la solución: `.sln`, proyectos y referencias entre ellos.
-2. Dominio: `Seat`, estados, transiciones, `Result`, errores + tests unitarios.
-3. Application: handlers, `ISeatRepository`, `ISeatEventPublisher`, DTOs + tests.
-4. Infrastructure: DbContext, mapeo con `xmin`, esquema y seed (`db/init.sql`), `docker-compose.yml`.
-5. API: endpoints, mapeo Result → HTTP, Scalar.
-6. Tests de integración y de concurrencia con Testcontainers.
-7. Docs: README, revisar/actualizar ADR, documentación de la API.
+- Documentación de API con OpenAPI + Scalar (`/scalar`) y `docs/API.md`.
