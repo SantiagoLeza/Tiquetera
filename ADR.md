@@ -199,10 +199,11 @@ Todas las dependencias apuntan hacia el dominio. `Domain` no depende de ningún 
 |---|---|---|---|
 | GET | `/seats` | Lista los asientos con su estado efectivo | 200 |
 | POST | `/seats/{id}/selection` | Selecciona un asiento | 201, 404, 409 |
-| PUT | `/seats/{id}/reservation` | Confirma la reserva | 200, 403, 404, 409, 410 |
-| DELETE | `/seats/{id}/selection` | Libera la selección | 204, 403, 404, 409, 410 |
+| PUT | `/seats/{id}/reservation` | Confirma la reserva | 200, 400, 403, 404, 409, 410 |
+| DELETE | `/seats/{id}/selection` | Libera la selección | 204, 400, 403, 404, 409, 410 |
 
 Semántica de los errores:
+- **400** falta el header `X-Hold-Token` o no es un GUID válido. Es un request mal formado, no un problema de propiedad, y se valida antes de llegar al caso de uso.
 - **404** el asiento no existe.
 - **409** el asiento no está en un estado que permita la operación (ej. ya está seleccionado por otro), o se perdió una carrera de concurrencia.
 - **403** el hold token no corresponde a la selección vigente.

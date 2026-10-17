@@ -45,8 +45,8 @@ Desafío técnico para un proceso de ingreso: una API .NET / C# que funciona com
 - Endpoints:
   - `GET /seats` → 200
   - `POST /seats/{id}/selection` → 201 / 404 / 409
-  - `PUT /seats/{id}/reservation` → 200 / 403 / 404 / 409 / 410
-  - `DELETE /seats/{id}/selection` → 204 / 403 / 404 / 409 / 410
+  - `PUT /seats/{id}/reservation` → 200 / 400 / 403 / 404 / 409 / 410
+  - `DELETE /seats/{id}/selection` → 204 / 400 / 403 / 404 / 409 / 410
 - Eventos de dominio (`SeatSelected`, `SeatReserved`, `SeatReleased`) vía `ISeatEventPublisher`; implementación `LoggingSeatEventPublisher`. Se publican **después** de persistir. Dejar comentarios en el código sobre la extensión futura a SSE (ver ADR-010). No implementar SSE.
 - Tests: xUnit. Unitarios de dominio con `FakeTimeProvider`; handlers con dobles; integración con `WebApplicationFactory` + Testcontainers (Postgres real); test de concurrencia (N requests paralelos al mismo asiento → exactamente uno gana, incluido el caso de selección vencida).
 - Documentación de API con OpenAPI + Scalar.
