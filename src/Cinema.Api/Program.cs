@@ -64,6 +64,4 @@ app.MapGet("/", () => TypedResults.Redirect("/scalar")).ExcludeFromDescription()
 
 app.MapSeatEndpoints();
 
-await app.Services.MigrateDatabaseAsync();
-
 await app.RunAsync();

@@ -11,8 +11,12 @@ services:
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Esquema y seed: Postgres ejecuta db/init.sql al inicializar el volumen vacío (ADR-001).
+      - ./db:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cinema -d cinema"]
+      # Por TCP (-h localhost): mientras corre init.sql, Postgres solo escucha por socket Unix,
+      # así el contenedor no figura "healthy" hasta que el esquema está creado.
+      test: ["CMD-SHELL", "pg_isready -h localhost -U cinema -d cinema"]
       interval: 5s
       timeout: 3s
       retries: 10

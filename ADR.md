@@ -34,7 +34,18 @@ Este documento reúne las decisiones técnicas tomadas durante el diseño, con s
 - La consistencia la garantiza la base de datos, no el proceso. La API queda stateless y puede escalar horizontalmente.
 - Se requiere Docker para levantar Postgres localmente (se provee `docker-compose.yml`).
 - El `docker-compose.yml` publica Postgres en el puerto **5433** del host, para no chocar con una instalación local en el 5432.
-- Las migraciones de EF Core se aplican al arrancar la API, así levantarla localmente es solo `docker compose up` + `dotnet run`. Con varias instancias arrancando a la vez esto no es adecuado: en un despliegue real las migraciones se aplicarían como un paso previo (script SQL o *migration bundle*).
+
+**Esquema: script SQL, fuera del arranque de la API.** El esquema y el seed viven en un único script, `db/init.sql`. PostgreSQL lo ejecuta al inicializar una base vacía (`/docker-entrypoint-initdb.d/`). Lo montan tanto `docker-compose.yml` como los tests de integración (Testcontainers): hay una sola fuente de verdad y los tests corren contra el mismo esquema que el entorno local.
+
+*Alternativas descartadas para el esquema:*
+- *Migraciones de EF Core aplicadas al arrancar la API.* Fue la primera implementación. Con varias instancias, todas intentan migrar a la vez, y además la API necesita permisos de DDL. El esquema queda repartido entre la migración, el *designer* y el *snapshot* generados.
+- *Migraciones de EF Core + script generado para ejecutar aparte.* Conserva toda esa maquinaria y suma el riesgo de olvidarse de regenerar el script. No se justifica para un esquema inicial único.
+
+*Consecuencias:*
+- La API solo lee y escribe datos: no crea ni modifica tablas.
+- El script declara restricciones `CHECK` que replican las invariantes de `Seat` (ADR-006) como segunda línea de defensa.
+- El modelo de EF y el script ya no se generan uno del otro y podrían desincronizarse. Los tests de integración corren contra el script, así que una diferencia los rompe.
+- Postgres ejecuta los scripts de `initdb.d` **solo cuando el volumen está vacío**. Cambiar el esquema en local requiere `docker compose down -v`. Si el esquema tuviera que evolucionar con datos existentes, se adoptaría una herramienta de migraciones versionadas (Flyway, DbUp o *bundles* de EF) ejecutada como paso de despliegue.
 
 ---
 
@@ -139,6 +150,8 @@ El estado persistido y el hold token son propiedades **privadas** de `Seat`:
 - El estado solo se consulta con `GetStatus(now)`, así nadie puede leer por error un `Selected` ya vencido.
 - El token solo sale de la entidad en el `SeatHold` que devuelve `Select`. Esto refuerza el ADR-003 a nivel de compilación.
 
+La base replica la invariante principal con un `CHECK` (`Selected` ⇔ token y vencimiento presentes; ver ADR-001). La autoridad es el dominio; la restricción protege ante escrituras que no pasen por él.
+
 **Alternativas descartadas.**
 - *Enum con validaciones dispersas en cada método.* Agregar un estado obliga a revisar varios métodos; las transiciones válidas no se leen en un solo lugar.
 - *Patrón State* (una clase por estado). Se descartó porque:
@@ -158,7 +171,9 @@ El estado persistido y el hold token son propiedades **privadas** de `Seat`:
 src/
   Cinema.Domain/          Seat, estados, transiciones, Result, errores
   Cinema.Application/     casos de uso, interfaces (repositorio, eventos), DTOs
-  Cinema.Infrastructure/  EF Core, DbContext, repositorio, migraciones
+  Cinema.Infrastructure/  EF Core, DbContext, mapeo, repositorio, publicador de eventos
+db/
+  init.sql                esquema y seed (ADR-001)
   Cinema.Api/             endpoints, mapeo Result → HTTP, documentación
 tests/
   Cinema.Domain.Tests/
@@ -271,12 +286,12 @@ Los tests de integración reemplazan `TimeProvider` por un `FakeTimeProvider`, a
 
 **Contexto.** La consigna define una única sala sin especificar su forma.
 
-**Decisión.** Sala fija de **8 filas (A–H) × 10 asientos (1–10)**, es decir, 80 asientos. El identificador es la **clave natural** fila + número (`"C7"`), usada como clave primaria y en las rutas (`/seats/C7/selection`). `Seat` expone además `Row` y `Number` por separado. Los asientos se cargan con un seed determinístico en la migración de EF Core.
+**Decisión.** Sala fija de **8 filas (A–H) × 10 asientos (1–10)**, es decir, 80 asientos. El identificador es la **clave natural** fila + número (`"C7"`), usada como clave primaria y en las rutas (`/seats/C7/selection`). `Seat` expone además `Row` y `Number` por separado. Los asientos se cargan con un seed determinístico en `db/init.sql`.
 
 **Alternativas descartadas.**
 - *Clave surrogate numérica (1..80).* Es más convencional en bases relacionales, pero `/seats/23` no dice qué asiento es y obliga al front a mapear. La clave natural acá es estable: un asiento no cambia de fila ni de número.
 - *Sala configurable* (filas y columnas en `appsettings.json`). Obliga a definir qué pasa si cambia la configuración con datos existentes, y la consigna no lo pide.
 
 **Consecuencias.**
-- `Seat` valida que la fila sea una letra mayúscula y el número sea positivo. El tamaño concreto de la sala vive en el seed, no en el dominio.
-- Cambiar la sala requiere una migración nueva. Es aceptable para una sala única.
+- `Seat` valida que la fila sea una letra mayúscula y el número sea positivo, y la base lo refuerza con `CHECK`s (incluido que el id sea fila + número). El tamaño concreto de la sala vive en el seed, no en el dominio.
+- Cambiar la sala requiere modificar el seed y recrear la base. Es aceptable para una sala única.

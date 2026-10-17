@@ -22,4 +22,9 @@
     <ProjectReference Include="..\..\src\Cinema.Api\Cinema.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- El mismo script que usa docker-compose, copiado a la salida para montarlo en el contenedor de los tests. -->
+    <None Include="..\..\db\init.sql" Link="db\init.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

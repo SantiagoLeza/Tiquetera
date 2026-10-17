@@ -12,10 +12,11 @@ Un asiento puede estar **libre**, **seleccionado** (hay 5 minutos para confirmar
 ## Levantarlo localmente
 
 ```bash
-# 1. Base de datos (PostgreSQL 17, publicado en el puerto 5433 del host)
+# 1. Base de datos (PostgreSQL 17 en el puerto 5433 del host). La primera vez crea el esquema
+#    y los 80 asientos ejecutando db/init.sql.
 docker compose up -d
 
-# 2. API (al arrancar aplica las migraciones y carga los 80 asientos)
+# 2. API
 dotnet run --project src/Cinema.Api --launch-profile http
 ```
 
@@ -25,7 +26,7 @@ dotnet run --project src/Cinema.Api --launch-profile http
 | Documento OpenAPI | http://localhost:5054/openapi/v1.json |
 | API | http://localhost:5054/seats |
 
-Para volver a la sala vacía: `docker compose down -v` y luego `docker compose up -d`.
+Para volver a la sala vacía, o después de modificar `db/init.sql`: `docker compose down -v` y luego `docker compose up -d`. Postgres solo ejecuta el script al inicializar un volumen vacío.
 
 ### Probarlo con curl
 
@@ -53,7 +54,7 @@ dotnet test
 |---|---|---|
 | `Cinema.Domain.Tests` | Transiciones, invariantes y bordes del TTL (reloj falso, sin esperas) | — |
 | `Cinema.Application.Tests` | Casos de uso con dobles del repositorio y del publicador de eventos | — |
-| `Cinema.Api.IntegrationTests` | API completa contra PostgreSQL real (Testcontainers), incluidos los tests de concurrencia | Docker |
+| `Cinema.Api.IntegrationTests` | API completa contra PostgreSQL real (Testcontainers, con el mismo `db/init.sql`), concurrencia y restricciones de la base | Docker |
 
 Los tests de concurrencia lanzan 20 pedidos simultáneos sobre el mismo asiento y verifican que exactamente uno gane: sobre un asiento libre, sobre una selección vencida y en confirmaciones con el mismo token. Un test adicional prueba el token de concurrencia de forma determinística.
 
@@ -72,8 +73,9 @@ Los tests de concurrencia lanzan 20 pedidos simultáneos sobre el mismo asiento 
 src/
   Cinema.Domain/          Seat (estados, tabla de transiciones, TTL), Result, errores, eventos
   Cinema.Application/     un handler por caso de uso, puertos (ISeatRepository, ISeatEventPublisher), DTOs
-  Cinema.Infrastructure/  EF Core + Npgsql, repositorio, migraciones y seed, publicador de eventos
+  Cinema.Infrastructure/  EF Core + Npgsql (mapeo con xmin), repositorio, publicador de eventos
   Cinema.Api/             Minimal APIs, mapeo Result → ProblemDetails, OpenAPI + Scalar
+db/init.sql               esquema (con CHECKs de las invariantes) y seed de la sala
 tests/                    un proyecto por capa + integración
 ```
 
@@ -84,6 +86,7 @@ Las dependencias apuntan hacia el dominio, que no conoce ningún framework. Las 
 - **Expiración perezosa**: no hay job de fondo. Se guarda `ExpiresAt` y el estado efectivo se calcula con el reloj del servidor en cada operación. → [ADR-004](ADR.md#adr-004--expiración-perezosa-del-ttl)
 - **`Result` para errores de negocio**, traducido a HTTP en un único lugar. Las excepciones quedan para lo inesperado. → [ADR-005](ADR.md#adr-005--errores-de-negocio-con-result)
 - **Tabla de transiciones declarativa** `(estado, acción) → estado` dentro de `Seat`. El estado y el token son privados de la entidad. → [ADR-006](ADR.md#adr-006--estados-del-asiento-enum--tabla-de-transiciones)
+- **Esquema en un script SQL** ejecutado por Postgres al inicializar la base, fuera del arranque de la API. El mismo script lo usan los tests. → [ADR-001](ADR.md#adr-001--persistencia-en-postgresql)
 - **Eventos de dominio** publicados después de persistir, con el punto de extensión preparado para tiempo real por SSE. → [ADR-010](ADR.md#adr-010--eventos-de-dominio-y-extensión-a-tiempo-real)
 
 ## Documentación
@@ -96,4 +99,4 @@ Las dependencias apuntan hacia el dominio, que no conoce ningún framework. Las 
 
 - Usuarios, autenticación y reservas de varios asientos a la vez (la consigna no los incluye).
 - Notificaciones en tiempo real: el diseño las prevé (ADR-010) pero no están implementadas.
-- Las migraciones se aplican al arrancar la API. Es cómodo para desarrollo; en un despliegue con varias instancias se ejecutarían como un paso previo (ADR-001).
+- Migraciones versionadas: el esquema es un único script inicial. Si tuviera que evolucionar con datos existentes, se usaría una herramienta como Flyway o DbUp como paso de despliegue (ADR-001).

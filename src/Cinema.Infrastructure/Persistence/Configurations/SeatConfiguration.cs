@@ -4,7 +4,11 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Cinema.Infrastructure.Persistence.Configurations;
 
-/// <summary>Mapeo de <see cref="Seat"/> a la tabla <c>seats</c>. El dominio no tiene atributos de EF: todo se declara acá.</summary>
+/// <summary>
+/// Mapeo de <see cref="Seat"/> a la tabla <c>seats</c>. El dominio no tiene atributos de EF: todo se declara acá.
+/// El esquema lo define <c>db/init.sql</c>, no EF: este mapeo debe coincidir con ese script
+/// (los tests de integración corren contra él y detectan cualquier diferencia).
+/// </summary>
 internal sealed class SeatConfiguration : IEntityTypeConfiguration<Seat>
 {
     public void Configure(EntityTypeBuilder<Seat> builder)
@@ -26,9 +30,6 @@ internal sealed class SeatConfiguration : IEntityTypeConfiguration<Seat>
         builder.Property(seat => seat.Number)
             .HasColumnName("number");
 
-        builder.HasIndex(seat => new { seat.Row, seat.Number })
-            .IsUnique();
-
         // Status y HoldToken son propiedades privadas de Seat: EF las mapea por nombre.
         builder.Property<SeatStatus>("Status")
             .HasColumnName("status")
@@ -48,7 +49,5 @@ internal sealed class SeatConfiguration : IEntityTypeConfiguration<Seat>
         // Cada UPDATE se emite como: UPDATE seats SET ... WHERE id = @id AND xmin = @versionLeida.
         builder.Property<uint>("Version")
             .IsRowVersion();
-
-        builder.HasData(AuditoriumLayout.CreateSeats());
     }
 }

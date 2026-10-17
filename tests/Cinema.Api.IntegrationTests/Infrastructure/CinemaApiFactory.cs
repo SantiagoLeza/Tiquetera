@@ -17,8 +17,10 @@ namespace Cinema.Api.IntegrationTests.Infrastructure;
 /// </summary>
 public sealed class CinemaApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    // Misma imagen que docker-compose.yml.
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    // Misma imagen y mismo script de esquema que docker-compose.yml.
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
+        .WithResourceMapping(new FileInfo(Path.Combine(AppContext.BaseDirectory, "db", "init.sql")), "/docker-entrypoint-initdb.d/")
+        .Build();
 
     /// <summary>Reloj controlado por los tests: reemplaza a <see cref="TimeProvider.System"/> en la API.</summary>
     public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 16, 20, 0, 0, TimeSpan.Zero));
@@ -33,8 +35,8 @@ public sealed class CinemaApiFactory : WebApplicationFactory<Program>, IAsyncLif
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Pisa la cadena de conexión de appsettings.Development.json con la del contenedor.
-        // Al arrancar, la API aplica las migraciones (y el seed) sobre esta base vacía.
+        // Pisa la cadena de conexión de appsettings.Development.json con la del contenedor,
+        // que ya tiene el esquema y los 80 asientos de db/init.sql.
         builder.UseSetting("ConnectionStrings:Cinema", _postgres.GetConnectionString());
 
         builder.ConfigureTestServices(services =>

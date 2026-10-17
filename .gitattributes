@@ -4,3 +4,4 @@
 *.sh text eol=lf
 *.sln text eol=crlf
 *.pdf binary
+*.sql text eol=lf
