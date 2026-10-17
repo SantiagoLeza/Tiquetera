@@ -44,6 +44,8 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
     StatusCodeSelector = exception => exception is BadHttpRequestException badRequest
         ? badRequest.StatusCode
         : StatusCodes.Status500InternalServerError,
+    // Un request mal formado es culpa del cliente: no se registra como error del servidor.
+    SuppressDiagnosticsCallback = context => context.Exception is BadHttpRequestException,
 });
 app.UseStatusCodePages();
 
