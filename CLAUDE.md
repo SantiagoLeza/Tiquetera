@@ -46,14 +46,12 @@ Desafío técnico para un proceso de ingreso: una API .NET / C# que funciona com
   - `GET /seats` → 200
   - `POST /seats/{id}/selection` → 201 / 404 / 409
   - `PUT /seats/{id}/reservation` → 200 / 403 / 404 / 409 / 410
-  - `DELETE /seats/{id}/selection` → 204 / 403 / 404 / 410
+  - `DELETE /seats/{id}/selection` → 204 / 403 / 404 / 409 / 410
 - Eventos de dominio (`SeatSelected`, `SeatReserved`, `SeatReleased`) vía `ISeatEventPublisher`; implementación `LoggingSeatEventPublisher`. Se publican **después** de persistir. Dejar comentarios en el código sobre la extensión futura a SSE (ver ADR-010). No implementar SSE.
 - Tests: xUnit. Unitarios de dominio con `FakeTimeProvider`; handlers con dobles; integración con `WebApplicationFactory` + Testcontainers (Postgres real); test de concurrencia (N requests paralelos al mismo asiento → exactamente uno gana, incluido el caso de selección vencida).
 - Documentación de API con OpenAPI + Scalar.
 
-## Pendiente de decidir
-
-- Composición de la sala (filas × columnas, formato del id del asiento, seed). Proponeme una opción antes de implementarla y agregala al ADR.
+- Sala: 8 filas (A–H) × 10 asientos = 80. Id = clave natural `"C7"` (PK y ruta). Seed determinístico en la migración (ADR-012).
 
 ## Plan de trabajo (en este orden, frenando al final de cada paso)
 

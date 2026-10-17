@@ -17,6 +17,7 @@ Este documento reúne las decisiones técnicas tomadas durante el diseño, con s
 9. [Diseño de los contratos REST](#adr-009--diseño-de-los-contratos-rest)
 10. [Eventos de dominio y extensión a tiempo real](#adr-010--eventos-de-dominio-y-extensión-a-tiempo-real)
 11. [Estrategia de testing](#adr-011--estrategia-de-testing)
+12. [Composición de la sala e identificador del asiento](#adr-012--composición-de-la-sala-e-identificador-del-asiento)
 
 ---
 
@@ -128,6 +129,10 @@ Cada error de dominio tiene un código y un tipo (`NotFound`, `Conflict`, `Forbi
 
 La entidad protege sus invariantes: setters privados, todas las transiciones pasan por métodos con nombre de negocio, y si el asiento está libre no tiene token ni vencimiento.
 
+El estado persistido y el hold token son propiedades **privadas** de `Seat`:
+- El estado solo se consulta con `GetStatus(now)`, así nadie puede leer por error un `Selected` ya vencido.
+- El token solo sale de la entidad en el `SeatHold` que devuelve `Select`. Esto refuerza el ADR-003 a nivel de compilación.
+
 **Alternativas descartadas.**
 - *Enum con validaciones dispersas en cada método.* Agregar un estado obliga a revisar varios métodos; las transiciones válidas no se leen en un solo lugar.
 - *Patrón State* (una clase por estado). Se descartó porque:
@@ -193,13 +198,17 @@ Todas las dependencias apuntan hacia el dominio. `Domain` no depende de ningún 
 | GET | `/seats` | Lista los asientos con su estado efectivo | 200 |
 | POST | `/seats/{id}/selection` | Selecciona un asiento | 201, 404, 409 |
 | PUT | `/seats/{id}/reservation` | Confirma la reserva | 200, 403, 404, 409, 410 |
-| DELETE | `/seats/{id}/selection` | Libera la selección | 204, 403, 404, 410 |
+| DELETE | `/seats/{id}/selection` | Libera la selección | 204, 403, 404, 409, 410 |
 
 Semántica de los errores:
 - **404** el asiento no existe.
 - **409** el asiento no está en un estado que permita la operación (ej. ya está seleccionado por otro), o se perdió una carrera de concurrencia.
 - **403** el hold token no corresponde a la selección vigente.
 - **410** la selección venció. Permite al cliente distinguir "llegaste tarde" de "lo tiene otro".
+
+El `DELETE` también puede responder 409: al liberar un asiento libre o reservado, o al perder una carrera contra un `PUT` con el mismo token. Una versión inicial de esta tabla lo omitía; se agregó al implementar el dominio para que ambos comandos usen el mismo criterio.
+
+**Precedencia.** Si aplica más de un error, se informa en este orden: 410 (vencida) → 409 (el estado no lo permite) → 403 (token incorrecto). El vencimiento se informa sin validar el token, porque que una selección venció ya es público en `GET /seats`.
 
 **Hold token por header.** `PUT` y `DELETE` reciben el token en el header `X-Hold-Token`. Se descartó enviarlo en el body porque, aunque HTTP lo permite, algunos clientes y proxies ignoran el body en `DELETE`; el header funciona igual en cualquier verbo.
 
@@ -237,3 +246,19 @@ Puntos considerados para esa extensión:
 **Alternativa descartada.** *Proveedor en memoria de EF Core o SQLite* para integración. No reproducen el comportamiento de PostgreSQL (en particular `xmin`), por lo que el test de concurrencia no probaría nada real.
 
 **Consecuencias.** Correr los tests de integración requiere Docker.
+
+---
+
+## ADR-012 — Composición de la sala e identificador del asiento
+
+**Contexto.** La consigna define una única sala sin especificar su forma.
+
+**Decisión.** Sala fija de **8 filas (A–H) × 10 asientos (1–10)**, es decir, 80 asientos. El identificador es la **clave natural** fila + número (`"C7"`), usada como clave primaria y en las rutas (`/seats/C7/selection`). `Seat` expone además `Row` y `Number` por separado. Los asientos se cargan con un seed determinístico en la migración de EF Core.
+
+**Alternativas descartadas.**
+- *Clave surrogate numérica (1..80).* Es más convencional en bases relacionales, pero `/seats/23` no dice qué asiento es y obliga al front a mapear. La clave natural acá es estable: un asiento no cambia de fila ni de número.
+- *Sala configurable* (filas y columnas en `appsettings.json`). Obliga a definir qué pasa si cambia la configuración con datos existentes, y la consigna no lo pide.
+
+**Consecuencias.**
+- `Seat` valida que la fila sea una letra mayúscula y el número sea positivo. El tamaño concreto de la sala vive en el seed, no en el dominio.
+- Cambiar la sala requiere una migración nueva. Es aceptable para una sala única.
