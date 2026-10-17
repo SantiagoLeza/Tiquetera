@@ -1,0 +1,11 @@
+<Project>
+  <!-- Configuración común a todos los proyectos de la solución.
+       MSBuild importa este archivo automáticamente en cada .csproj de este directorio o de sus subdirectorios. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Las advertencias de nulabilidad rompen el build: un posible NullReferenceException es un error, no un aviso. -->
+    <WarningsAsErrors>Nullable</WarningsAsErrors>
+  </PropertyGroup>
+</Project>
