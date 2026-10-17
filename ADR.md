@@ -117,7 +117,7 @@ Cada error de dominio tiene un código y un tipo (`NotFound`, `Conflict`, `Forbi
 
 **Consecuencias.**
 - Los fallos posibles son explícitos en las firmas y fáciles de testear.
-- `DbUpdateConcurrencyException` es de infraestructura pero su significado es de negocio ("otro usuario tomó el asiento"). Se captura fuera del dominio y se convierte en el error correspondiente; el dominio no conoce a EF Core.
+- `DbUpdateConcurrencyException` es de infraestructura pero su significado es de negocio ("otro usuario tomó el asiento"). Se captura fuera del dominio y se convierte en el error correspondiente; el dominio no conoce a EF Core. Concretamente, la traduce la implementación del repositorio: `ISeatRepository.SaveAsync` devuelve un `Result` que falla con `seat.concurrent_modification`, así que tampoco Application conoce a EF Core.
 
 ---
 
